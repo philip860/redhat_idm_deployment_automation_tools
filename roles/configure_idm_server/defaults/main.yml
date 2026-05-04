@@ -1,11 +1,11 @@
-idm_hostname: "idm.lab.duncan-networks.com"
-idm_shortname: "idm"
-idm_domain: "duncan-networks.com"
-idm_realm: "DUNCAN-NETWORKS.COM"
+# idm_hostname: "idm.lab.duncan-networks.com"
+# idm_shortname: "idm"
+# idm_domain: "duncan-networks.com"
+# idm_realm: "DUNCAN-NETWORKS.COM"
 
-idm_ip: "{{ ansible_default_ipv4.address }}"
-idm_dns_forwarder: "10.0.0.1"
-internal_ntp_allow_network: "10.0.0.0/24"
+# idm_ip: "{{ ansible_default_ipv4.address }}"
+# idm_dns_forwarder: "10.0.0.1"
+# internal_ntp_allow_network: "10.0.0.0/24"
 
 chrony_pools:
   - "2.rhel.pool.ntp.org"

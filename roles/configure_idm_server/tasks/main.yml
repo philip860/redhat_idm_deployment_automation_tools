@@ -38,6 +38,89 @@
     state: present
     backup: true
 
+- name: Ensure subscription-manager is installed
+  ansible.builtin.dnf:
+    name: subscription-manager
+    state: present
+  failed_when: false
+
+- name: Check current Red Hat subscription status
+  ansible.builtin.command: subscription-manager status
+  register: rhsm_status
+  changed_when: false
+  failed_when: false
+
+- name: Try installing required packages before Satellite registration
+  ansible.builtin.dnf:
+    name:
+      - firewalld
+      - chrony
+      - NetworkManager
+      - ipa-server
+      - ipa-server-dns
+    state: present
+  register: package_install_attempt
+  failed_when: false
+
+- name: Determine whether required IPA packages are unavailable
+  ansible.builtin.set_fact:
+    ipa_packages_missing: >-
+      {{
+        package_install_attempt.failed | default(false)
+        and (
+          'No package ipa-server available' in (package_install_attempt.msg | default(''))
+          or 'No package ipa-server-dns available' in (package_install_attempt.msg | default(''))
+          or 'No package ipa-server available' in (package_install_attempt.failures | default([]) | join(' '))
+          or 'No package ipa-server-dns available' in (package_install_attempt.failures | default([]) | join(' '))
+        )
+      }}
+
+- name: Register host to Red Hat Satellite/CDN when IPA packages are missing
+  when:
+    - ipa_packages_missing | bool
+    - rhsm_register_enabled | bool
+  block:
+    - name: Fail if RHSM username was not provided
+      ansible.builtin.fail:
+        msg: "rhsm_username is required when Red Hat registration is needed."
+      when: rhsm_username | default('', true) | length == 0
+
+    - name: Fail if RHSM password was not provided
+      ansible.builtin.fail:
+        msg: "rhsm_password is required when Red Hat registration is needed."
+      when: rhsm_password | default('', true) | length == 0
+
+    - name: Clean existing subscription state
+      ansible.builtin.command: subscription-manager clean
+      changed_when: true
+      failed_when: false
+
+    - name: Register system using username and password
+      ansible.builtin.command:
+        argv:
+          - subscription-manager
+          - register
+          - "--username={{ rhsm_username }}"
+          - "--password={{ rhsm_password }}"
+          - "--auto-attach"
+          - "--force"
+      register: rhsm_register_result
+      changed_when: true
+      no_log: true
+
+    - name: Refresh subscription-manager data
+      ansible.builtin.command: subscription-manager refresh
+      changed_when: true
+      failed_when: false
+
+    - name: Clean DNF metadata after registration
+      ansible.builtin.command: dnf clean all
+      changed_when: true
+
+    - name: Rebuild DNF cache after registration
+      ansible.builtin.command: dnf makecache
+      changed_when: true
+
 - name: Install required packages
   ansible.builtin.dnf:
     name:
@@ -190,6 +273,7 @@
       - "Detected interface: {{ idm_interface }}"
       - "NetworkManager connection: {{ idm_nm_connection }}"
       - "DNS forwarder: {{ idm_dns_forwarder }}"
+      - "Red Hat registration attempted: {{ ipa_packages_missing | default(false) and rhsm_register_enabled | bool }}"
       - "Directory Manager password: {{ dm_password | default('not generated; FreeIPA was already installed') }}"
       - "FreeIPA admin username: admin"
       - "FreeIPA admin password: {{ ipa_admin_password | default('not generated; FreeIPA was already installed') }}"

@@ -1,158 +1,196 @@
-    - name: Detect active IPv4 interface
-      ansible.builtin.set_fact:
-        idm_interface: "{{ ansible_default_ipv4.interface }}"
+---
+- name: Detect active IPv4 interface
+  ansible.builtin.set_fact:
+    idm_interface: "{{ ansible_default_ipv4.interface }}"
 
-    - name: Generate Directory Manager password
-      ansible.builtin.set_fact:
-        dm_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters','digits','punctuation']) }}"
+- name: Detect active IPv4 address
+  ansible.builtin.set_fact:
+    idm_ip: "{{ ansible_default_ipv4.address }}"
 
-    - name: Generate FreeIPA admin password
-      ansible.builtin.set_fact:
-        ipa_admin_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters','digits','punctuation']) }}"
+- name: Check if FreeIPA is already installed
+  ansible.builtin.stat:
+    path: /etc/ipa/default.conf
+  register: ipa_default_conf
 
-    - name: Set system hostname
-      ansible.builtin.hostname:
-        name: "{{ idm_hostname }}"
+- name: Generate Directory Manager password
+  ansible.builtin.set_fact:
+    dm_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters','digits']) }}"
+  when:
+    - dm_password is not defined
+    - not ipa_default_conf.stat.exists
 
-    - name: Ensure IdM hostname exists in /etc/hosts
-      ansible.builtin.lineinfile:
-        path: /etc/hosts
-        regexp: "^{{ idm_ip | regex_escape }}\\s+"
-        line: "{{ idm_ip }}  {{ idm_hostname }}  {{ idm_shortname }}"
-        state: present
-        backup: true
+- name: Generate FreeIPA admin password
+  ansible.builtin.set_fact:
+    ipa_admin_password: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters','digits']) }}"
+  when:
+    - ipa_admin_password is not defined
+    - not ipa_default_conf.stat.exists
 
-    - name: Install required packages
-      ansible.builtin.dnf:
-        name:
-          - firewalld
-          - chrony
-          - NetworkManager
-          - ipa-server
-          - ipa-server-dns
-        state: present
+- name: Set system hostname
+  ansible.builtin.hostname:
+    name: "{{ idm_hostname }}"
 
-    - name: Enable and start firewalld
-      ansible.builtin.systemd:
-        name: firewalld
-        enabled: true
-        state: started
+- name: Ensure IdM hostname exists in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ idm_ip | regex_escape }}\\s+"
+    line: "{{ idm_ip }}  {{ idm_hostname }}  {{ idm_shortname }}"
+    state: present
+    backup: true
 
-    - name: Open FreeIPA firewall services permanently
-      ansible.posix.firewalld:
-        service: "{{ item }}"
-        permanent: true
-        immediate: true
-        state: enabled
-      loop:
-        - freeipa-4
-        - dns
-        - ntp
+- name: Install required packages
+  ansible.builtin.dnf:
+    name:
+      - firewalld
+      - chrony
+      - NetworkManager
+      - ipa-server
+      - ipa-server-dns
+    state: present
 
-    - name: Open FreeIPA TCP firewall ports permanently
-      ansible.posix.firewalld:
-        port: "{{ item }}/tcp"
-        permanent: true
-        immediate: true
-        state: enabled
-      loop: "{{ freeipa_tcp_ports }}"
+- name: Enable and start NetworkManager
+  ansible.builtin.systemd:
+    name: NetworkManager
+    enabled: true
+    state: started
 
-    - name: Open FreeIPA UDP firewall ports permanently
-      ansible.posix.firewalld:
-        port: "{{ item }}/udp"
-        permanent: true
-        immediate: true
-        state: enabled
-      loop: "{{ freeipa_udp_ports }}"
+- name: Enable and start firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
 
-    - name: Reload firewalld
-      ansible.builtin.command: firewall-cmd --reload
-      changed_when: false
+- name: Open FreeIPA firewall services permanently
+  ansible.posix.firewalld:
+    service: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - freeipa-4
+    - dns
+    - ntp
 
-    - name: Replace chrony configuration
-      ansible.builtin.copy:
-        dest: /etc/chrony.conf
-        owner: root
-        group: root
-        mode: "0644"
-        backup: true
-        content: |
-          # Managed by Ansible
+- name: Open FreeIPA TCP firewall ports permanently
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ freeipa_tcp_ports }}"
 
-          # Use trusted external time sources
-          {% for pool in chrony_pools %}
-          pool {{ pool }} iburst
-          {% endfor %}
+- name: Open FreeIPA UDP firewall ports permanently
+  ansible.posix.firewalld:
+    port: "{{ item }}/udp"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ freeipa_udp_ports }}"
 
-          # DO NOT use DHCP-provided NTP servers for IdM
-          # sourcedir /run/chrony-dhcp
+- name: Reload firewalld
+  ansible.builtin.command: firewall-cmd --reload
+  changed_when: false
 
-          driftfile /var/lib/chrony/drift
-          makestep 1.0 3
-          rtcsync
+- name: Replace chrony configuration
+  ansible.builtin.copy:
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+    content: |
+      # Managed by Ansible
 
-          allow {{ internal_ntp_allow_network }}
-          local stratum 10
+      # Use trusted external time sources
+      {% for pool in chrony_pools %}
+      pool {{ pool }} iburst
+      {% endfor %}
 
-          keyfile /etc/chrony.keys
-          ntsdumpdir /var/lib/chrony
-          leapsectz right/UTC
-          logdir /var/log/chrony
-      notify: Restart chronyd
+      # DO NOT use DHCP-provided NTP servers for IdM
+      # sourcedir /run/chrony-dhcp
 
-    - name: Enable chronyd
-      ansible.builtin.systemd:
-        name: chronyd
-        enabled: true
-        state: started
+      driftfile /var/lib/chrony/drift
+      makestep 1.0 3
+      rtcsync
 
-    - name: Configure DNS server on active NetworkManager connection
-      community.general.nmcli:
-        conn_name: "{{ idm_interface }}"
-        type: ethernet
-        dns4:
-          - "{{ idm_dns_forwarder }}"
-        dns4_ignore_auto: true
-        state: present
+      allow {{ internal_ntp_allow_network }}
+      local stratum 10
 
-    - name: Bring NetworkManager connection up
-      ansible.builtin.command: "nmcli connection up {{ idm_interface }}"
-      changed_when: true
+      keyfile /etc/chrony.keys
+      ntsdumpdir /var/lib/chrony
+      leapsectz right/UTC
+      logdir /var/log/chrony
+  notify: Restart chronyd
 
-    - name: Check if FreeIPA is already installed
-      ansible.builtin.stat:
-        path: /etc/ipa/default.conf
-      register: ipa_default_conf
+- name: Enable and start chronyd
+  ansible.builtin.systemd:
+    name: chronyd
+    enabled: true
+    state: started
 
-    - name: Install FreeIPA server with integrated DNS
-      ansible.builtin.command: >
-        ipa-server-install
-        --unattended
-        --realm {{ idm_realm }}
-        --domain {{ idm_domain }}
-        --hostname {{ idm_hostname }}
-        --ds-password {{ dm_password | quote }}
-        --admin-password {{ ipa_admin_password | quote }}
-        --setup-dns
-        --forwarder {{ idm_dns_forwarder }}
-        --no-ntp
-      register: ipa_install_result
-      no_log: true
-      when: not ipa_default_conf.stat.exists
+- name: Detect active NetworkManager connection for default interface
+  ansible.builtin.command: nmcli -t -f NAME,DEVICE connection show --active
+  register: nmcli_active_connections
+  changed_when: false
 
-    - name: Show FreeIPA installation summary
-      ansible.builtin.debug:
-        msg:
-          - "FreeIPA installation complete."
-          - "Hostname: {{ idm_hostname }}"
-          - "Short name: {{ idm_shortname }}"
-          - "Domain: {{ idm_domain }}"
-          - "Realm: {{ idm_realm }}"
-          - "Server IP: {{ idm_ip }}"
-          - "Detected interface: {{ idm_interface }}"
-          - "DNS forwarder: {{ idm_dns_forwarder }}"
-          - "Directory Manager password: {{ dm_password }}"
-          - "FreeIPA admin username: admin"
-          - "FreeIPA admin password: {{ ipa_admin_password }}"
-          - "Web UI: https://{{ idm_hostname }}"
+- name: Set NetworkManager connection name
+  ansible.builtin.set_fact:
+    idm_nm_connection: >-
+      {{
+        nmcli_active_connections.stdout_lines
+        | select('search', ':' ~ idm_interface ~ '$')
+        | first
+        | split(':')
+        | first
+      }}
 
+- name: Fail if NetworkManager connection could not be detected
+  ansible.builtin.fail:
+    msg: "Could not detect active NetworkManager connection for interface {{ idm_interface }}"
+  when: idm_nm_connection is not defined or idm_nm_connection | length == 0
+
+- name: Configure DNS server on active NetworkManager connection
+  community.general.nmcli:
+    conn_name: "{{ idm_nm_connection }}"
+    type: ethernet
+    dns4:
+      - "{{ idm_dns_forwarder }}"
+    dns4_ignore_auto: true
+    state: present
+
+- name: Bring NetworkManager connection up
+  ansible.builtin.command: "nmcli connection up '{{ idm_nm_connection }}'"
+  changed_when: true
+
+- name: Install FreeIPA server with integrated DNS
+  ansible.builtin.command: >
+    ipa-server-install
+    --unattended
+    --realm {{ idm_realm }}
+    --domain {{ idm_domain }}
+    --hostname {{ idm_hostname }}
+    --ds-password {{ dm_password | quote }}
+    --admin-password {{ ipa_admin_password | quote }}
+    --setup-dns
+    --forwarder {{ idm_dns_forwarder }}
+    --no-ntp
+  register: ipa_install_result
+  no_log: true
+  when: not ipa_default_conf.stat.exists
+
+- name: Show FreeIPA installation summary
+  ansible.builtin.debug:
+    msg:
+      - "FreeIPA installation status: {{ 'already installed' if ipa_default_conf.stat.exists else 'installed by this run' }}"
+      - "Hostname: {{ idm_hostname }}"
+      - "Short name: {{ idm_shortname }}"
+      - "Domain: {{ idm_domain }}"
+      - "Realm: {{ idm_realm }}"
+      - "Server IP: {{ idm_ip }}"
+      - "Detected interface: {{ idm_interface }}"
+      - "NetworkManager connection: {{ idm_nm_connection }}"
+      - "DNS forwarder: {{ idm_dns_forwarder }}"
+      - "Directory Manager password: {{ dm_password | default('not generated; FreeIPA was already installed') }}"
+      - "FreeIPA admin username: admin"
+      - "FreeIPA admin password: {{ ipa_admin_password | default('not generated; FreeIPA was already installed') }}"
+      - "Web UI: https://{{ idm_hostname }}"

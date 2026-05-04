@@ -1,6 +1,6 @@
 ---
 - name: Install and configure FreeIPA IdM Server
-  hosts: idm_servers
+  hosts: "{{ idm_hostname }}"
   become: true
   gather_facts: true
 

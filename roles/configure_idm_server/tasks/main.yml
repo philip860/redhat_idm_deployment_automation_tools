@@ -50,34 +50,21 @@
   changed_when: false
   failed_when: false
 
-- name: Try installing required packages before Satellite registration
-  ansible.builtin.dnf:
-    name:
-      - firewalld
-      - chrony
-      - NetworkManager
-      - ipa-server
-      - ipa-server-dns
-    state: present
-  register: package_install_attempt
-  failed_when: false
-
-- name: Determine whether required IPA packages are unavailable
+- name: Determine whether system is currently registered
   ansible.builtin.set_fact:
-    ipa_packages_missing: >-
+    rhsm_registered: >-
       {{
-        package_install_attempt.failed | default(false)
+        rhsm_status.rc == 0
         and (
-          'No package ipa-server available' in (package_install_attempt.msg | default(''))
-          or 'No package ipa-server-dns available' in (package_install_attempt.msg | default(''))
-          or 'No package ipa-server available' in (package_install_attempt.failures | default([]) | join(' '))
-          or 'No package ipa-server-dns available' in (package_install_attempt.failures | default([]) | join(' '))
+          'Overall Status: Current' in rhsm_status.stdout
+          or 'Overall Status: Disabled' in rhsm_status.stdout
+          or 'System Purpose Status: Matched' in rhsm_status.stdout
         )
       }}
 
-- name: Register host to Red Hat Satellite/CDN when IPA packages are missing
+- name: Register host to Red Hat Satellite/CDN when not registered
   when:
-    - ipa_packages_missing | bool
+    - not rhsm_registered | bool
     - rhsm_register_enabled | bool
   block:
     - name: Fail if RHSM username was not provided
@@ -120,6 +107,12 @@
     - name: Rebuild DNF cache after registration
       ansible.builtin.command: dnf makecache
       changed_when: true
+
+- name: Check enabled DNF repositories
+  ansible.builtin.command: dnf repolist --enabled
+  register: enabled_repos
+  changed_when: false
+  failed_when: false
 
 - name: Install required packages
   ansible.builtin.dnf:
@@ -184,7 +177,6 @@
     content: |
       # Managed by Ansible
 
-      # Use trusted external time sources
       {% for pool in chrony_pools %}
       pool {{ pool }} iburst
       {% endfor %}
@@ -273,7 +265,8 @@
       - "Detected interface: {{ idm_interface }}"
       - "NetworkManager connection: {{ idm_nm_connection }}"
       - "DNS forwarder: {{ idm_dns_forwarder }}"
-      - "Red Hat registration attempted: {{ ipa_packages_missing | default(false) and rhsm_register_enabled | bool }}"
+      - "Red Hat registered before this run: {{ rhsm_registered }}"
+      - "Red Hat registration enabled: {{ rhsm_register_enabled }}"
       - "Directory Manager password: {{ dm_password | default('not generated; FreeIPA was already installed') }}"
       - "FreeIPA admin username: admin"
       - "FreeIPA admin password: {{ ipa_admin_password | default('not generated; FreeIPA was already installed') }}"

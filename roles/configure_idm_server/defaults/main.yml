@@ -26,3 +26,8 @@ freeipa_udp_ports:
   - 464
   - 53
   - 123
+
+# Red Hat CDN registration fallback
+rhsm_register_enabled: true
+rhsm_username: "{{ satellite_username_var | default('', true) }}"
+rhsm_password: "{{ satellite_password_var | default('', true) }}"

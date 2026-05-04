@@ -6,12 +6,3 @@
 
   roles:
     - configure_idm_server
-
-
-
-  handlers:
-    - name: Restart chronyd
-      ansible.builtin.systemd:
-        name: chronyd
-        state: restarted
-        enabled: true

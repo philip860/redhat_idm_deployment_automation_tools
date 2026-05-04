@@ -1,0 +1,28 @@
+idm_hostname: "idm.lab.duncan-networks.com"
+idm_shortname: "idm"
+idm_domain: "duncan-networks.com"
+idm_realm: "DUNCAN-NETWORKS.COM"
+
+idm_ip: "{{ ansible_default_ipv4.address }}"
+idm_dns_forwarder: "10.0.0.1"
+internal_ntp_allow_network: "10.0.0.0/24"
+
+chrony_pools:
+  - "2.rhel.pool.ntp.org"
+  - "0.pool.ntp.org"
+  - "1.pool.ntp.org"
+
+freeipa_tcp_ports:
+  - 80
+  - 443
+  - 389
+  - 636
+  - 88
+  - 464
+  - 53
+
+freeipa_udp_ports:
+  - 88
+  - 464
+  - 53
+  - 123
